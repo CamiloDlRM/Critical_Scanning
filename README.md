@@ -1,10 +1,10 @@
-# Critical Scanning - Sistema de Monitoreo Inteligente en AWS
+# Critical Scanning - Sistema de Monitoreo en AWS
 
-## Descripción General
+## Descripción
 
-**Critical Scanning** es una solución completa de infraestructura como código (IaC) diseñada para implementar un sistema de monitoreo inteligente y automatizado en AWS. El proyecto utiliza Terraform para desplegar una arquitectura cloud que integra servicios de computación, redes seguras, gestión de identidades y monitoreo avanzado.
+Este proyecto implementa una infraestructura completa en AWS usando Terraform. La idea es tener un sistema de monitoreo que no solo alerte cuando algo falla, sino que también ayude a entender qué salió mal y cómo solucionarlo.
 
-La solución está diseñada para proporcionar visibilidad completa sobre el estado de las instancias EC2, con capacidades de alertamiento inteligente que permiten respuestas proactivas ante anomalías o problemas de rendimiento.
+El sistema monitorea instancias EC2 con CloudWatch, y cuando detecta un problema, usa Lambda con un LLM para analizar la situación y enviar notificaciones a Slack con diagnósticos y sugerencias de solución.
 
 ## Arquitectura del Sistema
 
@@ -64,128 +64,96 @@ La solución está diseñada para proporcionar visibilidad completa sobre el est
                   └───────────────────┘
 ```
 
-### Flujo de Monitoreo Inteligente
+### Cómo funciona
 
-1. **Recolección de Métricas**: CloudWatch recopila métricas en tiempo real de las instancias EC2
-2. **Evaluación de Umbrales**: Las alarmas de CloudWatch evalúan continuamente las métricas contra umbrales predefinidos
-3. **Activación de Eventos**: Cuando se detecta una anomalía, la alarma se activa
-4. **Procesamiento Inteligente**: Lambda ejecuta un análisis utilizando un modelo de lenguaje (LLM) en Python
-5. **Diagnóstico Automatizado**: El LLM analiza el contexto y genera hipótesis sobre la causa raíz
-6. **Notificación Proactiva**: Se envía una alerta a Slack con análisis detallado y recomendaciones
+1. CloudWatch recopila métricas de las instancias EC2 (CPU, memoria, red, disco)
+2. Las alarmas evalúan estas métricas contra umbrales configurados
+3. Cuando algo excede el umbral, se dispara una alarma
+4. La alarma activa una función Lambda
+5. Lambda usa un LLM para analizar el problema y generar un diagnóstico
+6. Se envía una notificación a Slack con el análisis y recomendaciones prácticas
 
 ## Módulos de Infraestructura
 
 ### 1. Módulo de Networking
 
-Implementa una arquitectura de red segura y escalable:
+Configura la red en AWS:
 
-- **VPC Dedicada**: Red virtual aislada (10.0.0.0/16)
-- **Subnet Pública** (10.0.1.0/24):
-  - Internet Gateway para conectividad externa
-  - NAT Gateway para acceso saliente de recursos privados
-  - Route Table configurada para tráfico público
+- VPC dedicada (10.0.0.0/16)
+- Subnet pública (10.0.1.0/24): contiene el NAT Gateway e Internet Gateway
+- Subnet privada (10.0.2.0/24): donde vive la instancia EC2, sin acceso directo desde internet
 
-- **Subnet Privada** (10.0.2.0/24):
-  - Aloja las instancias EC2 de producción
-  - Acceso a internet solo vía NAT Gateway
-  - Aislamiento de seguridad para recursos críticos
+La configuración es estándar para servicios que necesitan estar aislados de internet pero poder hacer conexiones salientes.
 
-**Archivos clave**:
-- `modules/NETWORKING/vpc.tf` - Definición de VPC
-- `modules/NETWORKING/public_subnets.tf` - Configuración de subnet pública
-- `modules/NETWORKING/private_subnets.tf` - Configuración de subnet privada
+**Archivos**:
+- `modules/NETWORKING/vpc.tf`
+- `modules/NETWORKING/public_subnets.tf`
+- `modules/NETWORKING/private_subnets.tf`
 
 ### 2. Módulo de EC2
 
-Gestiona las instancias de computación con configuración automatizada:
+Maneja la instancia donde corren las aplicaciones:
 
-**Características**:
-- **Instancia**: t2.micro con CPU credits ilimitados
-- **AMI**: Ubuntu optimizada para AWS (ami-0f5fcdfbd140e4ab7)
-- **Network Interface**: ENI dedicada con IP privada fija (10.0.2.10)
-- **Bootstrapping**: Instalación automática de Docker mediante user_data
-- **Monitoreo**: CloudWatch Agent integrado para métricas detalladas
+- Instancia t2.micro con CPU credits ilimitados
+- Ubuntu (ami-0f5fcdfbd140e4ab7)
+- IP privada fija (10.0.2.10)
+- Docker se instala automáticamente al iniciar la instancia mediante user_data
 
-**Configuración de Docker**:
-El script `docker_base_installation.sh` configura:
-- Usuario y grupo dedicado (`dockeruser`, `dockergrp`)
-- Instalación completa de Docker Engine
-- Docker Compose plugin
-- Configuración de systemd para inicio automático
+El script `docker_base_installation.sh` hace:
+- Crea un usuario `dockeruser` con su grupo
+- Instala Docker Engine y Docker Compose
+- Configura todo para que inicie automáticamente
 
-**Archivos clave**:
-- `modules/EC2/ec2.tf` - Configuración de instancia
-- `modules/EC2/docker_base_installation.sh` - Script de inicialización
+**Archivos**:
+- `modules/EC2/ec2.tf`
+- `modules/EC2/docker_base_installation.sh`
 
 ### 3. Módulo de IAM
 
-Implementa el principio de privilegio mínimo con políticas de seguridad robustas:
+Configura permisos y accesos:
 
-**Roles y Políticas**:
+1. **Usuario de Testing** (`testing-user-terraform`):
+   - Requiere MFA obligatoriamente, sin MFA no puede hacer nada
+   - Tiene acceso completo a EC2 cuando está autenticado
 
-1. **Usuario de Testing**:
-   - Usuario IAM: `testing-user-terraform`
-   - Política MFA obligatoria (denegar todas las acciones sin MFA)
-   - Acceso completo a EC2 con autenticación multifactor
+2. **Rol para EC2** (`ec2-ssm-role`):
+   - Permite conectarse a la instancia vía Systems Manager (sin SSH)
+   - Permite enviar métricas y logs a CloudWatch
 
-2. **Rol de EC2**:
-   - `ec2-ssm-role`: Rol asumible por instancias EC2
-   - **AmazonSSMManagedInstanceCore**: Acceso a Systems Manager para gestión remota
-   - **CloudWatchAgentServerPolicy**: Permiso para enviar métricas y logs a CloudWatch
+3. **Instance Profile** (`ec2-ssm-profile`):
+   - Asocia el rol a la instancia EC2
 
-3. **Instance Profile**:
-   - `ec2-ssm-profile`: Asocia el rol a las instancias EC2
+De esta forma la instancia no necesita credenciales hardcodeadas, todo se maneja con el rol.
 
-**Características de Seguridad**:
-- Autenticación multifactor obligatoria
-- Gestión remota segura vía AWS Systems Manager (sin necesidad de SSH)
-- Publicación de métricas custom a CloudWatch
-- Rotación automática de credenciales temporales
-
-**Archivos clave**:
-- `modules/IAM/Iam.tf` - Políticas y roles
+**Archivos**:
+- `modules/IAM/Iam.tf`
 
 ## Sistema de Monitoreo y Alertas
 
-### CloudWatch Integration
+### CloudWatch
 
-El sistema utiliza CloudWatch para monitoreo continuo:
+CloudWatch monitorea las siguientes métricas:
+- CPU
+- Memoria
+- Disco (I/O)
+- Red
+- Métricas custom de contenedores Docker
 
-**Métricas Monitoreadas**:
-- Utilización de CPU
-- Uso de memoria
-- I/O de disco
-- Tráfico de red
-- Métricas custom de aplicaciones Docker
+Las alarmas se disparan cuando:
+- CPU >80% por más de 5 minutos
+- Memoria >90%
+- Red con latencia elevada
+- Errores en aplicaciones
 
-**CloudWatch Alarms**:
-Las alarmas están configuradas para detectar:
-- Picos de CPU sostenidos (>80% por 5 minutos)
-- Agotamiento de memoria (>90%)
-- Latencia de red elevada
-- Errores de aplicación
+### Lambda con LLM
 
-### Lambda Function - Análisis Inteligente
+Cuando se dispara una alarma, Lambda hace lo siguiente:
 
-**Tecnología**: Python con integración de LLM
-
-**Funcionalidad**:
-Cuando se activa una alarma de CloudWatch:
-
-1. **Captura de Contexto**:
-   - Recibe el evento de CloudWatch con detalles de la métrica
-   - Obtiene datos históricos para análisis de tendencias
-   - Recopila logs recientes de la instancia
-
-2. **Análisis con LLM**:
-   - Procesa el contexto utilizando un modelo de lenguaje
-   - Genera hipótesis sobre la causa raíz del problema
-   - Identifica patrones conocidos de fallos
-
-3. **Generación de Recomendaciones**:
-   - Sugiere acciones correctivas inmediatas
-   - Proporciona comandos específicos cuando sea aplicable
-   - Prioriza soluciones por impacto y facilidad de implementación
+1. Recibe el evento de CloudWatch con los detalles
+2. Obtiene datos históricos de las últimas 24 horas
+3. Envía todo al LLM (Python) para que analice qué pudo haber pasado
+4. El LLM genera hipótesis sobre la causa y sugerencias de solución
+5. Se formatea todo y se envía a Slack
 
 ### Notificaciones en Slack
 
@@ -235,21 +203,21 @@ aws configure
 aws sts get-caller-identity
 ```
 
-## Guía de Despliegue
+## Cómo Desplegar
 
-### 1. Clonar el Repositorio
+### 1. Clonar el repo
 
 ```bash
 git clone <repository-url>
 cd Critical_Scanning
 ```
 
-### 2. Configurar Variables
+### 2. Configurar región (opcional)
 
-Editar `Terraform/variable_values.auto.tfvars`:
+Editar `Terraform/variable_values.auto.tfvars` si quieres cambiar la región:
 
 ```hcl
-region = "us-east-2"  # Ajustar según necesidad
+region = "us-east-2"
 ```
 
 ### 3. Inicializar Terraform
@@ -259,60 +227,41 @@ cd Terraform
 terraform init
 ```
 
-Este comando:
-- Descarga los providers necesarios (AWS)
-- Inicializa el backend
-- Configura módulos
-
-### 4. Planificar el Despliegue
+### 4. Revisar qué se va a crear
 
 ```bash
 terraform plan
 ```
 
-Revisar los recursos que se crearán:
-- 1 VPC
-- 2 Subnets (pública y privada)
-- 1 Internet Gateway
-- 1 NAT Gateway
-- 1 Elastic IP
-- 1 Instancia EC2
-- 3 Roles/Políticas IAM
-- Tablas de rutas y asociaciones
+Esto creará: VPC, 2 subnets, Internet Gateway, NAT Gateway, 1 EC2, y roles IAM.
 
-### 5. Aplicar la Infraestructura
+### 5. Desplegar
 
 ```bash
 terraform apply
 ```
 
-Confirmar con `yes` cuando se solicite.
+Confirma con `yes`. Tarda unos 3-5 minutos.
 
-**Tiempo estimado**: 3-5 minutos
-
-### 6. Verificar el Despliegue
+### 6. Verificar
 
 ```bash
-# Verificar instancia EC2
+# Ver la instancia
 aws ec2 describe-instances \
   --filters "Name=tag:Name,Values=ec2_dev_instance" \
   --query 'Reservations[0].Instances[0].[InstanceId,State.Name,PrivateIpAddress]'
 
-# Conectar vía SSM (sin necesidad de SSH)
+# Conectar por SSM
 aws ssm start-session --target <instance-id>
 
-# Verificar Docker en la instancia
+# Verificar Docker
 docker --version
 docker ps
 ```
 
-### 7. Configurar Monitoreo (Post-Despliegue)
+### 7. Post-despliegue
 
-Una vez desplegada la infraestructura base, el sistema de monitoreo inteligente se integra automáticamente:
-
-1. **CloudWatch Alarms**: Configuradas para las métricas clave
-2. **Lambda Function**: Desplegada y conectada a las alarmas
-3. **Slack Webhook**: Integrado para notificaciones en tiempo real
+El monitoreo con CloudWatch, Lambda y Slack se integra manualmente después del despliegue inicial de los servicios ya vistos.
 
 ## Estructura del Proyecto
 
@@ -344,37 +293,10 @@ Critical_Scanning/
 
 ## Gestión del Proyecto
 
-### Comandos Útiles
-
-**Ver estado actual**:
-```bash
-terraform show
-```
-
-**Actualizar infraestructura**:
-```bash
-terraform plan
-terraform apply
-```
-
-**Destruir recursos**:
-```bash
-terraform destroy
-```
-
-**Formatear código**:
-```bash
-terraform fmt -recursive
-```
-
-**Validar configuración**:
-```bash
-terraform validate
-```
-
 ### Conectividad a la Instancia
 
-**Opción 1: AWS Systems Manager (Recomendado)**
+Se usa AWS Systems Manager para conectarse a la instancia sin necesidad de SSH ni IPs públicas:
+
 ```bash
 # Listar instancias disponibles
 aws ssm describe-instance-information
@@ -389,170 +311,105 @@ aws ssm send-command \
   --parameters 'commands=["docker ps"]'
 ```
 
-**Opción 2: SSH (Requiere configuración adicional de Security Group)**
-```bash
-ssh -i key.pem ubuntu@<instance-private-ip>
-```
+## Seguridad
 
-## Características de Seguridad
+### Red
 
-### Arquitectura de Red Segura
+- Las instancias están en una subnet privada, no tienen IP pública
+- Solo pueden acceder a internet a través del NAT Gateway
+- VPC dedicada separada de otros recursos
 
-1. **Aislamiento de Capas**:
-   - Instancias de producción en subnet privada
-   - Sin acceso directo desde internet
-   - NAT Gateway para actualizaciones de paquetes
+### IAM
 
-2. **Segmentación**:
-   - VPC dedicada aislada de otros recursos
-   - Route tables específicas por subnet
-   - Control granular de tráfico
+- MFA obligatorio para el usuario de testing
+- La instancia EC2 usa roles, no credenciales hardcodeadas
+- Permisos mínimos necesarios: solo SSM y CloudWatch
 
-### Gestión de Identidades
+### Acceso
 
-1. **Autenticación Multifactor**:
-   - MFA obligatorio para usuario de testing
-   - Bloqueo completo sin MFA activo
+- Conexiones vía Systems Manager, sin SSH
+- Las credenciales se rotan automáticamente
+- Todo queda registrado en CloudWatch Logs y CloudTrail
 
-2. **Privilegio Mínimo**:
-   - Roles específicos por función
-   - Políticas AWS managed para consistencia
-   - Instance profile con permisos limitados
-
-3. **Seguridad Sin Credenciales**:
-   - SSM Session Manager (sin claves SSH)
-   - Rotación automática de credenciales temporales
-   - Logs de auditoría completos
-
-### Monitoreo de Seguridad
-
-- **CloudWatch Logs**: Registro de todas las acciones
-- **CloudTrail**: Auditoría de llamadas API
-- **VPC Flow Logs**: Análisis de tráfico de red
-
-## Consideraciones de Producción
+## Para Producción
 
 ### Escalabilidad
 
-Para entornos de producción, considerar:
-
-1. **Auto Scaling Groups**:
-   - Escalado automático basado en métricas
-   - Distribución multi-AZ
-   - Integración con Application Load Balancer
-
-2. **RDS para Persistencia**:
-   - Bases de datos managed
-   - Backups automáticos
-   - Multi-AZ para alta disponibilidad
-
-3. **S3 para Almacenamiento**:
-   - Logs centralizados
-   - Backups de configuraciones
-   - Versionado de objetos
+Si necesitas más capacidad:
+- Auto Scaling Groups para escalar horizontalmente
+- Load Balancer para distribuir tráfico
+- RDS en vez de bases de datos en EC2
+- S3 para almacenar logs y backups
 
 ### Alta Disponibilidad
 
-1. **Multi-AZ Deployment**:
-```hcl
-# Ejemplo de configuración
-availability_zones = ["us-east-2a", "us-east-2b", "us-east-2c"]
-```
+- Distribuir en múltiples AZs
+- Auto Scaling con health checks
+- Multi-AZ para RDS
 
-2. **Health Checks**:
-   - CloudWatch Alarms para detección de fallos
-   - Auto-recovery de instancias
-   - Notificaciones automáticas
+### Costos Actuales
 
-### Optimización de Costos
+- EC2 t2.micro: ~$8.50/mes
+- NAT Gateway: ~$32/mes
+- CloudWatch: free tier
+- Total: ~$40-50/mes
 
-1. **Recursos Actuales**:
-   - EC2 t2.micro: ~$8.50/mes
-   - NAT Gateway: ~$32/mes
-   - CloudWatch: Capa gratuita
-   - **Total estimado**: ~$40-50/mes
+Para reducir costos:
+- Reserved Instances (ahorro de hasta 72%)
+- Spot Instances para cargas no críticas
+- VPC Endpoints en vez de NAT Gateway
 
-2. **Optimizaciones Posibles**:
-   - Reserved Instances (hasta 72% de ahorro)
-   - Spot Instances para cargas no críticas
-   - VPC Endpoints para eliminar NAT Gateway
-   - S3 lifecycle policies
+## Monitoreo
 
-## Monitoreo y Observabilidad
+### Qué se puede monitorear
 
-### Métricas Clave
+Infraestructura:
+- Salud de las instancias
+- Uso del NAT Gateway
+- Tráfico de red
 
-**Nivel de Infraestructura**:
-- Salud de instancias EC2
-- Utilización de NAT Gateway
-- Flujo de tráfico de red
-
-**Nivel de Aplicación**:
+Aplicación:
 - Estado de contenedores Docker
-- Uso de recursos por contenedor
-- Logs de aplicación
+- Recursos usados por contenedor
+- Logs
 
-**Nivel de Costos**:
-- AWS Cost Explorer
-- Budgets y alertas de gasto
+Costos:
+- Cost Explorer
+- Budgets con alertas
 
-### Dashboards
+### Dashboards en CloudWatch
 
-CloudWatch Dashboards recomendados:
+Se pueden crear dashboards para:
+- Vista general de infraestructura (VPC, EC2, alarmas)
+- Performance de aplicaciones (Docker, logs, errores)
+- Seguridad (accesos, eventos IAM, cambios)
 
-1. **Infrastructure Overview**:
-   - Estado general de la VPC
-   - Métricas de EC2 consolidadas
-   - Alertas activas
+## Problemas Comunes Enfrentados
 
-2. **Application Performance**:
-   - Métricas de Docker
-   - Logs de aplicaciones
-   - Trazas de errores
-
-3. **Security & Compliance**:
-   - Intentos de acceso
-   - Eventos de IAM
-   - Cambios de configuración
-
-## Troubleshooting
-
-### Problemas Comunes
-
-**1. Instancia EC2 no aparece en SSM**
+**La instancia no aparece en SSM**
 ```bash
-# Verificar rol IAM
+# Verificar que tiene el rol correcto
 aws ec2 describe-instances --instance-ids i-xxxxx \
   --query 'Reservations[0].Instances[0].IamInstanceProfile'
 
-# Revisar logs de SSM agent
+# Ver logs del agent
 sudo journalctl -u amazon-ssm-agent
-```
 
-**2. Docker no se instaló correctamente**
-```bash
-# Ver logs de user_data
-sudo cat /var/log/cloud-init-output.log
-
-# Re-ejecutar script manualmente
-sudo bash /var/lib/cloud/instance/scripts/part-001
-```
-
-**3. No hay conectividad a internet desde subnet privada**
+**Sin internet en la subnet privada**
 ```bash
 # Verificar NAT Gateway
 aws ec2 describe-nat-gateways --filter "Name=vpc-id,Values=vpc-xxxxx"
 
-# Revisar route table
+# Ver route tables
 aws ec2 describe-route-tables --filters "Name=vpc-id,Values=vpc-xxxxx"
 ```
 
-**4. Alarmas de CloudWatch no se activan**
+**Las alarmas no se disparan**
 ```bash
-# Verificar estado de alarma
+# Estado de la alarma
 aws cloudwatch describe-alarms --alarm-names <alarm-name>
 
-# Revisar métricas recientes
+# Ver métricas
 aws cloudwatch get-metric-statistics \
   --namespace AWS/EC2 \
   --metric-name CPUUtilization \
@@ -576,34 +433,14 @@ aws cloudwatch get-metric-statistics \
 - [ ] Disaster recovery plan automatizado
 - [ ] Compliance monitoring (CIS, PCI-DSS)
 
-## Contribución
-
-Para contribuir al proyecto:
-
-1. Fork el repositorio
-2. Crear una rama feature (`git checkout -b feature/nueva-funcionalidad`)
-3. Commit los cambios (`git commit -m 'feat: agregar nueva funcionalidad'`)
-4. Push a la rama (`git push origin feature/nueva-funcionalidad`)
-5. Abrir un Pull Request
-
-### Estándares de Código
-
-- Seguir convenciones de Terraform
-- Documentar variables y outputs
-- Incluir ejemplos de uso
-- Validar con `terraform validate` y `terraform fmt`
-
 ## Licencia
 
-Este proyecto está bajo la licencia MIT.
+MIT
 
-## Contacto y Soporte
+## Contacto
 
-Para preguntas, sugerencias o reportar problemas:
-
-- Abrir un issue en el repositorio
+- Issues en GitHub
 - Email: [tu-email@ejemplo.com]
-- Documentación adicional: [wiki del proyecto]
 
 ---
 
