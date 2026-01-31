@@ -10,59 +10,7 @@ El sistema monitorea instancias EC2 con CloudWatch, y cuando detecta un problema
 
 ### Componentes Principales
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      AWS Cloud                              │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │                    VPC (10.0.0.0/16)                  │  │
-│  │                                                       │  │
-│  │  ┌──────────────────┐    ┌──────────────────┐         │  │
-│  │  │  Public Subnet   │    │  Private Subnet  │         │  │
-│  │  │  (10.0.1.0/24)   │    │  (10.0.2.0/24)   │         │  │
-│  │  │                  │    │                  │         │  │
-│  │  │ ┌──────────────┐ │    │ ┌──────────────┐ │         │  │
-│  │  │ │ NAT Gateway  │ │    │ │ EC2 Instance │ │         │  │
-│  │  │ └──────────────┘ │    │ │  + Docker    │ │         │  │
-│  │  │        ▲         │    │ └──────┬───────┘ │         │  │
-│  │  │        │         │    │        │         │         │  │
-│  │  └────────┼─────────┘    └────────┼─────────┘         │  │
-│  │           │                       │                   │  │
-│  │  ┌────────┴─────────┐             │                   │  │
-│  │  │ Internet Gateway │             │                   │  │
-│  │  └──────────────────┘             │                   │  │
-│  └───────────────────────────────────┼───────────────────┘  │
-│                                      │                      │
-│  ┌───────────────────────────────────▼───────────────────┐  │
-│  │              CloudWatch Monitoring                    │  │
-│  │  • CPU Utilization    • Network I/O                   │  │
-│  │  • Memory Usage       • Disk Performance              │  │
-│  │  • Custom Metrics     • System Health                 │  │
-│  └───────────────────────┬───────────────────────────────┘  │
-│                          │                                  │
-│  ┌───────────────────────▼───────────────────────────────┐  │
-│  │              CloudWatch Alarms                        │  │
-│  │  • Threshold-based triggers                           │  │
-│  │  • Multi-metric evaluation                            │  │
-│  │  • Automatic escalation                               │  │
-│  └───────────────────────┬───────────────────────────────┘  │
-│                          │                                  │
-│  ┌───────────────────────▼───────────────────────────────┐  │
-│  │         AWS Lambda Function                           │  │ 
-│  │  • Event-driven execution                             │  │
-│  │  • LLM-powered analysis                               │  │
-│  │  • Intelligent diagnostics                            │  │
-│  └───────────────────────┬───────────────────────────────┘  │
-│                          │                                  │ 
-└──────────────────────────┼──────────────────────────────────┘
-                           │
-                  ┌────────▼──────────┐
-                  │  Slack Workspace  │
-                  │  • Notifications  │
-                  │  • AI Insights    │
-                  │  • Actionable     │
-                  │    Recommendations│
-                  └───────────────────┘
-```
+![Arquitectura AWS](images/AWS_ARCH_TERRAFORM.drawio.png)
 
 ### Cómo funciona
 
